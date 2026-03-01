@@ -2595,136 +2595,135 @@ const App = () => {
 				className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4"
 			  >
 				<div
-				  className="bg-neutral-900 w-full max-w-lg rounded-3xl border border-neutral-800 shadow-2xl overflow-hidden
+				  className="bg-neutral-900 w-full max-w-xl rounded-3xl border border-neutral-800 shadow-2xl overflow-hidden
 							 max-h-[calc(100vh-2rem)] flex flex-col"
 				  onClick={(e) => e.stopPropagation()}
 				>
 				  {/* ✅ 內容區：可滾動 */}
-				  <div className="pt-6 pb-6 flex-1 overflow-y-auto overscroll-contain" style={{ WebkitOverflowScrolling: 'touch' }} >
+				  <div className="p-6 flex-1 overflow-y-auto overscroll-contain" style={{ WebkitOverflowScrolling: 'touch' }} >
 					<div className="flex flex-col items-center">
-					  <div className="px-3">
-						<div className="bg-neutral-950 p-3 rounded-3xl border border-neutral-800 mt-6 mb-8 w-full">
-							<div className="grid grid-cols-6 gap-0">
-							  {editingBoard.map((row, r) => (
-								  <React.Fragment key={r}>
+					  <div className="bg-neutral-950 p-3 rounded-3xl border-2 border-neutral-800 mt-6 mb-8">
+						<div className="grid grid-cols-6 gap-0">
+						  {editingBoard.map((row, r) => (
+							  <React.Fragment key={r}>
 
-									{/* ✅ row0 / row1 分隔粗白線 */}
-									{r === 1 && (
-									  <div className="col-span-6 h-2 bg-white z-50 shadow-[0_0_10px_rgba(255,255,255,0.5)]"></div>
+								{/* ✅ row0 / row1 分隔粗白線 */}
+								{r === 1 && (
+								  <div className="col-span-6 h-2 bg-white z-50 shadow-[0_0_10px_rgba(255,255,255,0.5)]"></div>
+								)}
+
+								{row.map((orb, c) => (
+								  <div
+									key={`${r}-${c}`}
+									onClick={() => {
+									  const next = editingBoard.map(row => [...row]);
+									  const cur = next[r][c];
+
+									  const o = orbOf(cur);
+									  const xm = xMarkOf(cur);
+									  const qm = qMarkOf(cur);
+
+									  // ---------- ORB 刷子 ----------
+									  if (selectedMark === 0) {
+										next[r][c] = withMarks(selectedBrush, xm, qm);
+										setEditingBoard(next);
+										return;
+									  }
+
+									  // ---------- X1 / X2 ----------
+									  if (selectedMark === 1 || selectedMark === 2) {
+										const want = selectedMark;
+										const nx = (xm === want) ? 0 : want;
+										const nq = (nx !== 0) ? 0 : qm;
+										next[r][c] = withMarks(o, nx, nq);
+										setEditingBoard(next);
+										return;
+									  }
+
+									  // ---------- Q1 / Q2 ----------
+									  if (selectedMark === 3 || selectedMark === 4) {
+										const wantQ = (selectedMark === 3) ? 1 : 2;
+
+										if (wantQ === 1 && xm !== 0) return;
+										if (wantQ === 2 && xm === 1) return;
+
+										if (qm === wantQ) {
+										  next[r][c] = withMarks(o, xm, 0);
+										  setEditingBoard(next);
+										  return;
+										}
+
+										if (r === 0) {
+										  for (let cc = 0; cc < COLS; cc++) {
+											const v = next[0][cc];
+											if (wantQ === 1 && qMarkOf(v) === 2) return;
+											if (wantQ === 2 && qMarkOf(v) === 1) return;
+										  }
+										}
+
+										for (let rr = 0; rr < TOTAL_ROWS; rr++) {
+										  for (let cc = 0; cc < COLS; cc++) {
+											const v = next[rr][cc];
+											if (qMarkOf(v) === wantQ) {
+											  next[rr][cc] = withMarks(orbOf(v), xMarkOf(v), 0);
+											}
+										  }
+										}
+
+										next[r][c] = withMarks(o, xm, wantQ);
+										setEditingBoard(next);
+										return;
+									  }
+									}}
+									className={`relative w-16 h-16 md:w-20 md:h-20 flex items-center justify-center transition-all duration-75
+									  ${r === 0 ? 'ring-2 ring-yellow-400 z-10 rounded-2xl' : 'rounded-2xl'}
+									  ${orbOf(editingBoard[r][c]) === selectedBrush ? 'ring-2 ring-white' : ''}
+									`}
+								  >
+									<img
+									  src={Object.values(ORB_TYPES).find(t => t.id === orbOf(orb))?.img}
+									  className="w-[90%] h-[90%] object-contain pointer-events-none select-none"
+									  draggable={false}
+									  alt=""
+									/>
+
+									{xMarkOf(orb) === 1 && (
+									  <img
+										src={x1Img}
+										className="absolute inset-0 w-full h-full object-contain pointer-events-none select-none"
+										draggable={false}
+										alt=""
+									  />
 									)}
 
-									{row.map((orb, c) => (
-									  <div
-										key={`${r}-${c}`}
-										onClick={() => {
-										  const next = editingBoard.map(row => [...row]);
-										  const cur = next[r][c];
+									{xMarkOf(orb) === 2 && (
+									  <img
+										src={x2Img}
+										className="absolute inset-0 w-full h-full object-contain pointer-events-none select-none"
+										draggable={false}
+										alt=""
+									  />
+									)}
 
-										  const o = orbOf(cur);
-										  const xm = xMarkOf(cur);
-										  const qm = qMarkOf(cur);
-
-										  // ---------- ORB 刷子 ----------
-										  if (selectedMark === 0) {
-											next[r][c] = withMarks(selectedBrush, xm, qm);
-											setEditingBoard(next);
-											return;
-										  }
-
-										  // ---------- X1 / X2 ----------
-										  if (selectedMark === 1 || selectedMark === 2) {
-											const want = selectedMark;
-											const nx = (xm === want) ? 0 : want;
-											const nq = (nx !== 0) ? 0 : qm;
-											next[r][c] = withMarks(o, nx, nq);
-											setEditingBoard(next);
-											return;
-										  }
-
-										  // ---------- Q1 / Q2 ----------
-										  if (selectedMark === 3 || selectedMark === 4) {
-											const wantQ = (selectedMark === 3) ? 1 : 2;
-
-											if (wantQ === 1 && xm !== 0) return;
-											if (wantQ === 2 && xm === 1) return;
-
-											if (qm === wantQ) {
-											  next[r][c] = withMarks(o, xm, 0);
-											  setEditingBoard(next);
-											  return;
-											}
-
-											if (r === 0) {
-											  for (let cc = 0; cc < COLS; cc++) {
-												const v = next[0][cc];
-												if (wantQ === 1 && qMarkOf(v) === 2) return;
-												if (wantQ === 2 && qMarkOf(v) === 1) return;
-											  }
-											}
-
-											for (let rr = 0; rr < TOTAL_ROWS; rr++) {
-											  for (let cc = 0; cc < COLS; cc++) {
-												const v = next[rr][cc];
-												if (qMarkOf(v) === wantQ) {
-												  next[rr][cc] = withMarks(orbOf(v), xMarkOf(v), 0);
-												}
-											  }
-											}
-
-											next[r][c] = withMarks(o, xm, wantQ);
-											setEditingBoard(next);
-											return;
-										  }
-										}}
-										className={`relative w-16 h-16 md:w-20 md:h-20 flex items-center justify-center transition-all duration-75
-										  ${r === 0 ? 'ring-2 ring-yellow-400 z-10 rounded-2xl' : 'rounded-2xl'}
-										  ${orbOf(editingBoard[r][c]) === selectedBrush ? 'ring-2 ring-white' : ''}
-										`}
-									  >
-										<img
-										  src={Object.values(ORB_TYPES).find(t => t.id === orbOf(orb))?.img}
-										  className="w-[90%] h-[90%] object-contain pointer-events-none select-none"
-										  draggable={false}
-										  alt=""
-										/>
-
-										{xMarkOf(orb) === 1 && (
-										  <img
-											src={x1Img}
-											className="absolute inset-0 w-full h-full object-contain pointer-events-none select-none"
-											draggable={false}
-											alt=""
-										  />
-										)}
-
-										{xMarkOf(orb) === 2 && (
-										  <img
-											src={x2Img}
-											className="absolute inset-0 w-full h-full object-contain pointer-events-none select-none"
-											draggable={false}
-											alt=""
-										  />
-										)}
-
-										{qMarkOf(orb) === 1 && (
-										  <div className="absolute top-1 left-1 px-2 py-0.5 rounded-lg bg-cyan-500/90 text-black text-xs font-black border border-black/30">
-											START
-										  </div>
-										)}
-
-										{qMarkOf(orb) === 2 && (
-										  <div className="absolute top-1 left-1 px-2 py-0.5 rounded-lg bg-fuchsia-500/90 text-black text-xs font-black border border-black/30">
-											END
-										  </div>
-										)}
+									{qMarkOf(orb) === 1 && (
+									  <div className="absolute top-1 left-1 px-2 py-0.5 rounded-lg bg-cyan-500/90 text-black text-xs font-black border border-black/30">
+										START
 									  </div>
-									))}
-								  </React.Fragment>
+									)}
+
+									{qMarkOf(orb) === 2 && (
+									  <div className="absolute top-1 left-1 px-2 py-0.5 rounded-lg bg-fuchsia-500/90 text-black text-xs font-black border border-black/30">
+										END
+									  </div>
+									)}
+								  </div>
 								))}
-							</div>
-						  </div>
+							  </React.Fragment>
+							))}
+						</div>
 					  </div>
-					  <div className="w-full px-6">
+
+					  <div className="w-full">
 						<p className="text-xs font-black text-neutral-500 uppercase tracking-widest text-center mb-4">
 						  ORB PALETTE
 						</p>

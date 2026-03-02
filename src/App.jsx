@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { toCanvas } from "html-to-image";
 import GIF from "gif.js.optimized";
 import gifWorkerUrl from "gif.js.optimized/dist/gif.worker.js?url";
+import gifsicle from "gifsicle-wasm-browser";
 import { FileDown, Wrench, Play, Pause, Square, Zap, RefreshCw, Database, Activity, Target, BrainCircuit, Settings2, Sliders, Layers, Microscope, Binary, Timer, Unlink, AlignJustify, AlignCenterVertical, Columns, Rows, RotateCcw, Footprints, Trophy, Edit3, Check, X, Palette, Clock, Settings, Hourglass, Ruler, CloudLightning, MoveUpRight, Move, Lightbulb } from 'lucide-react';
 import wImg from './assets/w.png';
 import fImg from './assets/f.png';
@@ -1109,31 +1110,6 @@ const App = () => {
 	  return { x: Math.round(x), y: Math.round(y) };
 	}, []);
 
-  const addHoldFrames = async (n, delay = frameDelay) => {
-	  if (isCancelled()) return;
-
-	  // 先等一幀確保 DOM 是最後狀態
-	  await new Promise(r => requestAnimationFrame(r));
-	  if (isCancelled()) return;
-
-	  // 抓最後畫面一次
-	  const holdCanvas = await toCanvas(el, captureOpts);
-	  if (isCancelled()) return;
-
-	  // 尺寸不符就不加（避免你前面那個 size mismatch）
-	  if (holdCanvas.width !== firstCanvas.width || holdCanvas.height !== firstCanvas.height) {
-		console.warn("Skip hold frames due to size mismatch:", holdCanvas.width, holdCanvas.height);
-		return;
-	  }
-
-	  // 重複塞 n 幀（同一張畫面），讓結尾停住
-	  for (let k = 0; k < n; k++) {
-		if (isCancelled()) return;
-		gif.addFrame(holdCanvas, { delay, copy: true });
-		bumpProgress();
-	  }
-	};
-
   const exportGif = useCallback(async () => {
 	  // ✅ 開新的一次匯出：換 id、取消旗標歸零
 	  const myId = ++exportTokenRef.current.id;
@@ -1981,6 +1957,52 @@ const App = () => {
   // ====== 核心路徑幾何邏輯：節點端口分配系統 (v12.9) ======
   // ====== 全重疊錯開：Node-Port Lane System ======
 
+  const sampleAlongPolyline = (pts, spacing = 22, startOffset = 10) => {
+	  if (!pts || pts.length < 2) return [];
+
+	  // 每段長度
+	  const segLen = [];
+	  let total = 0;
+	  for (let i = 0; i < pts.length - 1; i++) {
+		const dx = pts[i + 1].x - pts[i].x;
+		const dy = pts[i + 1].y - pts[i].y;
+		const L = Math.hypot(dx, dy);
+		segLen.push(L);
+		total += L;
+	  }
+	  if (total <= 1e-6) return [];
+
+	  const out = [];
+	  // 從 startOffset 開始，每隔 spacing 一個
+	  for (let dist = startOffset; dist < total - startOffset; dist += spacing) {
+		// 找 dist 落在哪一段
+		let acc = 0;
+		let i = 0;
+		while (i < segLen.length && acc + segLen[i] < dist) {
+		  acc += segLen[i];
+		  i++;
+		}
+		if (i >= segLen.length) break;
+
+		const L = segLen[i] || 1;
+		const t = (dist - acc) / L;
+
+		const a = pts[i];
+		const b = pts[i + 1];
+
+		const x = a.x + (b.x - a.x) * t;
+		const y = a.y + (b.y - a.y) * t;
+
+		const dx = b.x - a.x;
+		const dy = b.y - a.y;
+		const ang = Math.atan2(dy, dx) * 180 / Math.PI; // 讓 +X 對齊切線方向
+
+		out.push({ x, y, ang });
+	  }
+
+	  return out;
+	};
+
   const buildPathStringAndMarkersRounded = (pts, radius = 8) => {
 	  if (!pts || pts.length < 2) return { d: "", start: null, tip: null };
 
@@ -2039,135 +2061,136 @@ const App = () => {
 	  return { d: dStr, start, tip };
 	};
 
-const normalizeRcPath = (rcPath) => {
-  if (!rcPath || rcPath.length < 1) return [];
-  const out = [rcPath[0]];
-  for (let i = 1; i < rcPath.length; i++) {
-    const p = rcPath[i];
-    const q = out[out.length - 1];
-    if (p.r !== q.r || p.c !== q.c) out.push(p);
-  }
-  return out;
-};
+  const normalizeRcPath = (rcPath) => {
+	  if (!rcPath || rcPath.length < 1) return [];
+	  const out = [rcPath[0]];
+	  for (let i = 1; i < rcPath.length; i++) {
+		const p = rcPath[i];
+		const q = out[out.length - 1];
+		if (p.r !== q.r || p.c !== q.c) out.push(p);
+	  }
+	  return out;
+	};
 
-const buildSegmentsFromRcPath = (rcPathRaw) => {
-  const rcPath = normalizeRcPath(rcPathRaw);
-  if (rcPath.length < 2) return [];
+  const buildSegmentsFromRcPath = (rcPathRaw) => {
+	  const rcPath = normalizeRcPath(rcPathRaw);
+	  if (rcPath.length < 2) return [];
 
-  const segments = [];
-  let start = 0;
+	  const segments = [];
+	  let start = 0;
 
-  const dir = (a, b) => {
-    const dr = b.r - a.r;
-    const dc = b.c - a.c;
-    // ✅ 理論上不會 0,0（normalize 會去掉），保險
-    return `${Math.sign(dr)},${Math.sign(dc)}`;
-  };
+	  const dir = (a, b) => {
+		const dr = b.r - a.r;
+		const dc = b.c - a.c;
+		// ✅ 理論上不會 0,0（normalize 會去掉），保險
+		return `${Math.sign(dr)},${Math.sign(dc)}`;
+	  };
 
-  let d0 = dir(rcPath[0], rcPath[1]);
+	  let d0 = dir(rcPath[0], rcPath[1]);
 
-  for (let i = 1; i < rcPath.length - 1; i++) {
-    const d1 = dir(rcPath[i], rcPath[i + 1]);
-    if (d1 !== d0) {
-      segments.push({ start, end: i });
-      start = i;
-      d0 = d1;
-    }
-  }
+	  for (let i = 1; i < rcPath.length - 1; i++) {
+		const d1 = dir(rcPath[i], rcPath[i + 1]);
+		if (d1 !== d0) {
+		  segments.push({ start, end: i });
+		  start = i;
+		  d0 = d1;
+		}
+	  }
 
-  segments.push({ start, end: rcPath.length - 1 });
-  return segments;
-};
+	  segments.push({ start, end: rcPath.length - 1 });
+	  return segments;
+	};
 
-const buildSegmentLabelsFromRcPath = (
-  rcPathRaw,
-  getCellCenterPx,
-  {
-    labelR = 8,
-    pathStroke = 4,
-    gap = 1.5,
-    alongScale = 0.22,
-    cellSize = 64,
-    minPxLen = 10,
-  } = {}
-) => {
-  const rcPath = normalizeRcPath(rcPathRaw);
-  if (rcPath.length < 2) return [];
+  const buildSegmentLabelsFromRcPath = (
+	  rcPathRaw,
+	  getCellCenterPx,
+	  {
+		labelR = 8,
+		pathStroke = 4,
+		gap = 1.5,
+		alongScale = 0.22,
+		cellSize = 64,
+		minPxLen = 10,
+	  } = {}
+	) => {
+	  const rcPath = normalizeRcPath(rcPathRaw);
+	  if (rcPath.length < 2) return [];
 
-  const segs = buildSegmentsFromRcPath(rcPath);
-  if (!segs.length) return [];
+	  const segs = buildSegmentsFromRcPath(rcPath);
+	  if (!segs.length) return [];
 
-  const labels = [];
-  const off = labelR + pathStroke / 2 + gap;
-  const alongBase = Math.max(8, Math.min(18, cellSize * alongScale));
+	  const labels = [];
+	  const off = labelR + pathStroke / 2 + gap;
+	  const alongBase = Math.max(8, Math.min(18, cellSize * alongScale));
 
-  const usage = new Map();
-  const segKey = (A, B) => {
-    const k1 = `${A.x},${A.y}|${B.x},${B.y}`;
-    const k2 = `${B.x},${B.y}|${A.x},${A.y}`;
-    return k1 < k2 ? k1 : k2;
-  };
-  const laneOf = (count) => (count === 0 ? 0 : (count % 2 ? (count + 1) / 2 : -(count / 2)));
+	  const usage = new Map();
+	  const segKey = (A, B) => {
+		const k1 = `${A.x},${A.y}|${B.x},${B.y}`;
+		const k2 = `${B.x},${B.y}|${A.x},${A.y}`;
+		return k1 < k2 ? k1 : k2;
+	  };
+	  const laneOf = (count) => (count === 0 ? 0 : (count % 2 ? (count + 1) / 2 : -(count / 2)));
 
-  for (let s = 0; s < segs.length; s++) {
-    const { start, end } = segs[s];
+	  for (let s = 0; s < segs.length; s++) {
+		const { start, end } = segs[s];
 
-    // A,B: 用段的首尾
-    const A = rcPath[start];
-    const B = rcPath[end];
+		// A,B: 用段的首尾
+		const A = rcPath[start];
+		const B = rcPath[end];
 
-    const pA = getCellCenterPx(A.r, A.c);
-    const pB = getCellCenterPx(B.r, B.c);
+		const pA = getCellCenterPx(A.r, A.c);
+		const pB = getCellCenterPx(B.r, B.c);
 
-    let dx = pB.x - pA.x;
-    let dy = pB.y - pA.y;
-    let L = Math.hypot(dx, dy);
+		let dx = pB.x - pA.x;
+		let dy = pB.y - pA.y;
+		let L = Math.hypot(dx, dy);
 
-    // ✅ 如果 L 太短或怪，改用「段內第一個有效方向」來定向（但仍會畫 label）
-    if (!Number.isFinite(L) || L < 1e-6) {
-      // 找段內第一個不同點
-      let i = start;
-      while (i < end && rcPath[i].r === rcPath[i + 1].r && rcPath[i].c === rcPath[i + 1].c) i++;
-      if (i < end) {
-        const p1 = getCellCenterPx(rcPath[i].r, rcPath[i].c);
-        const p2 = getCellCenterPx(rcPath[i + 1].r, rcPath[i + 1].c);
-        dx = p2.x - p1.x;
-        dy = p2.y - p1.y;
-        L = Math.hypot(dx, dy);
-      }
-    }
+		// ✅ 如果 L 太短或怪，改用「段內第一個有效方向」來定向（但仍會畫 label）
+		if (!Number.isFinite(L) || L < 1e-6) {
+		  // 找段內第一個不同點
+		  let i = start;
+		  while (i < end && rcPath[i].r === rcPath[i + 1].r && rcPath[i].c === rcPath[i + 1].c) i++;
+		  if (i < end) {
+			const p1 = getCellCenterPx(rcPath[i].r, rcPath[i].c);
+			const p2 = getCellCenterPx(rcPath[i + 1].r, rcPath[i + 1].c);
+			dx = p2.x - p1.x;
+			dy = p2.y - p1.y;
+			L = Math.hypot(dx, dy);
+		  }
+		}
 
-    // ✅ 保證有方向：再不行就給一個水平
-    if (!Number.isFinite(L) || L < 1e-6) {
-      dx = 1; dy = 0; L = 1;
-    }
+		// ✅ 保證有方向：再不行就給一個水平
+		if (!Number.isFinite(L) || L < 1e-6) {
+		  dx = 1; dy = 0; L = 1;
+		}
 
-    // ✅ 不再 continue：短段也畫，只是用 minPxLen 讓偏移穩定
-    const LforCalc = Math.max(L, minPxLen);
-    const ux = dx / L;
-    const uy = dy / L;
-    const nx = -uy;
-    const ny = ux;
+		// ✅ 不再 continue：短段也畫，只是用 minPxLen 讓偏移穩定
+		const LforCalc = Math.max(L, minPxLen);
+		const ux = dx / L;
+		const uy = dy / L;
+		const nx = -uy;
+		const ny = ux;
 
-    const mx = (pA.x + pB.x) / 2;
-    const my = (pA.y + pB.y) / 2;
+		const mx = (pA.x + pB.x) / 2;
+		const my = (pA.y + pB.y) / 2;
 
-    const key = segKey(pA, pB);
-    const count = usage.get(key) || 0;
-    usage.set(key, count + 1);
-    const lane = laneOf(count);
+		const key = segKey(pA, pB);
+		const count = usage.get(key) || 0;
+		usage.set(key, count + 1);
+		const lane = laneOf(count);
 
-    const alongMax = Math.max(0, LforCalc * 0.45 - (labelR + 2));
-    const along = Math.min(alongBase, alongMax);
+		const alongMax = Math.max(0, LforCalc * 0.45 - (labelR + 2));
+		const along = Math.min(alongBase, alongMax);
 
-    const x = mx + nx * off + ux * (along * lane);
-    const y = my + ny * off + uy * (along * lane);
+		const x = mx + nx * off + ux * (along * lane);
+		const y = my + ny * off + uy * (along * lane);
 
-    labels.push({ idx: labels.length + 1, x, y });
-  }
+		labels.push({ idx: labels.length + 1, x, y });
+	  }
 
-  return labels;
-};
+	  return labels;
+	};
+  
   return (
     <div className="min-h-screen bg-neutral-950 text-white font-sans">
 		<div className="sticky top-0 z-[3000] bg-neutral-900/95 backdrop-blur border-b border-white/10">
@@ -2431,16 +2454,23 @@ const buildSegmentLabelsFromRcPath = (
 
 					const pts0 = buildPixelPath(visiblePath);
 
+					const bumpPx = Math.max(10, Math.min(22, stableCellSize * 0.22));
+					const rampPx = Math.max(10, Math.min(22, stableCellSize * 0.22));
+
 					const ptsJump = collapseUpcomingOverlapRunsV3(pts0, {
 					  prefixMinEdges: 1,
 					  suffixMinEdges: 1,
 					  fullMinEdges: 3,
-					  bump: 14,
-					  bumpRamp: 14,
+					  bump: bumpPx,
+					  bumpRamp: rampPx,
 					});
 
 					const ptsDetour = deOverlapByRampedDetourV2(ptsJump, 8, 14);
-					const { d, start, tip } = buildPathStringAndMarkersRounded(ptsDetour, 18);
+					const { d, start, tip } = buildPathStringAndMarkersRounded(ptsDetour, 10);
+
+					const triMarks = replayDone
+					  ? sampleAlongPolyline(ptsDetour, 22, 14)  // spacing, startOffset 你可調
+					  : [];
 
 					// ✅ 段號：只看原始 rcPath (visiblePath) 的轉折
 					// ✅ 位置：投影到 ptsDetour
@@ -2516,6 +2546,41 @@ const buildSegmentLabelsFromRcPath = (
 							opacity={0.95}
 						  />
 						</>
+						
+						{replayDone && triMarks.length > 0 && (
+						  <g opacity={1}>
+							{triMarks.map((m, idx) => {
+							  const leg = 4;
+
+								// 🔥 越小越尖：45=原本，30=更尖(60°)，25=更尖(50°)
+								const angleDeg = 30;
+								const theta = angleDeg * Math.PI / 180;
+
+								// 兩條腿端點（以角點 0,0 為中心，往後(-x)展開）
+								const dx = -leg * Math.cos(theta);
+								const dy =  leg * Math.sin(theta);
+
+								const coreWidth = 6;
+								const sw = coreWidth * 0.15;
+
+								return (
+								  <g
+									key={idx}
+									transform={`translate(${m.x} ${m.y}) rotate(${m.ang})`}
+								  >
+									<path
+									  d={`M ${dx} ${-dy} L 0 0 L ${dx} ${dy}`}
+									  fill="none"
+									  stroke="black"
+									  strokeWidth={sw}
+									  strokeLinecap="round"
+									  strokeLinejoin="round"
+									/>
+								  </g>
+								);
+							})}
+						  </g>
+						)}
 
 						{replayDone && segLabels.length > 0 && (
 						  <g>

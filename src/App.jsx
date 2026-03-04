@@ -41,11 +41,11 @@ const DIRS_4 = [[0, 1], [0, -1], [1, 0], [-1, 0]];
 const DIRS_8 = [[0, 1], [0, -1], [1, 0], [-1, 0], [1, 1], [1, -1], [-1, 1], [-1, -1]];
 
 const DEFAULT_CONFIG = {
-  beamWidth: 700,    
+  beamWidth: 400,    
   maxSteps: 30,      
-  maxNodes: 400000,  
-  stepPenalty: 800,  
-  potentialWeight: 2500, 
+  maxNodes: 220000,  
+  stepPenalty: 300,  
+  potentialWeight: 1000, 
   clearedWeight: 300,
   replaySpeed: 250, 
 };
@@ -1930,7 +1930,6 @@ const App = () => {
   return out;
 };
 
-//1122
   const hypot = (x, y) => Math.hypot(x, y);
 
   // 回傳：把 C-A-B-D 的 A->B 鼓包，改成沿著「與 AB 平行且距離 h」的直線 detour

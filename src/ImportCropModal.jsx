@@ -34,6 +34,15 @@ export default function ImportCropModal({
     h: 240 * ASPECT,
   });
 
+  const getContainContentRect = (wrapW, wrapH, naturalW, naturalH) => {
+	  const s = Math.min(wrapW / naturalW, wrapH / naturalH);
+	  const drawW = naturalW * s;
+	  const drawH = naturalH * s;
+	  const drawX = (wrapW - drawW) / 2;
+	  const drawY = (wrapH - drawH) / 2;
+	  return { drawX, drawY, drawW, drawH, scale: s };
+	};
+
   // ✅ 拖曳/縮放過程用 ref（不卡）
   const cropRectRef = useRef(cropRect);
   useEffect(() => {
@@ -283,38 +292,51 @@ export default function ImportCropModal({
 
   // ====== 把裁切框映射回原圖像素，生成 6x5 canvas ======
   const buildCropCanvas = () => {
-    const img = imgRef.current;
-    const wrap = wrapRef.current;
-    if (!img || !wrap) return null;
+	  const img = imgRef.current;
+	  const wrap = wrapRef.current;
+	  if (!img || !wrap) return null;
 
-    const wrapRect = wrap.getBoundingClientRect();
-    const imgRect = img.getBoundingClientRect();
+	  const wrapW = wrap.clientWidth;
+	  const wrapH = wrap.clientHeight;
 
-    const r = cropRectRef.current;
+	  // ✅ 真正圖片內容在 wrap 裡的顯示矩形（去掉黑邊）
+	  const { drawX, drawY, drawW, drawH } = getContainContentRect(
+		wrapW,
+		wrapH,
+		img.naturalWidth,
+		img.naturalHeight
+	  );
 
-    const scaleX = img.naturalWidth / imgRect.width;
-    const scaleY = img.naturalHeight / imgRect.height;
+	  const r = cropRectRef.current;
 
-    const cropLeftVp = wrapRect.left + r.x;
-    const cropTopVp = wrapRect.top + r.y;
+	  // ✅ 把裁切框（wrap 座標）轉到「圖片內容座標」(0..drawW/H)
+	  const cx0 = r.x - drawX;
+	  const cy0 = r.y - drawY;
 
-    const sx = (cropLeftVp - imgRect.left) * scaleX;
-    const sy = (cropTopVp - imgRect.top) * scaleY;
-    const sw = r.w * scaleX;
-    const sh = r.h * scaleY;
+	  // ✅ 夾在圖片內容內（避免框到黑邊）
+	  const cx = clamp(cx0, 0, drawW);
+	  const cy = clamp(cy0, 0, drawH);
+	  const cw = clamp(r.w, 0, drawW - cx);
+	  const ch = clamp(r.h, 0, drawH - cy);
 
-    const cell = 64;
-    const canvas = document.createElement("canvas");
-    canvas.width = COLS * cell;
-    canvas.height = ROWS * cell;
-    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+	  // ✅ 回推到原圖像素
+	  const sx = (cx / drawW) * img.naturalWidth;
+	  const sy = (cy / drawH) * img.naturalHeight;
+	  const sw = (cw / drawW) * img.naturalWidth;
+	  const sh = (ch / drawH) * img.naturalHeight;
 
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+	  const cell = 64;
+	  const canvas = document.createElement("canvas");
+	  canvas.width = COLS * cell;
+	  canvas.height = ROWS * cell;
+	  const ctx = canvas.getContext("2d", { willReadFrequently: true });
 
-    return canvas;
-  };
+	  ctx.imageSmoothingEnabled = true;
+	  ctx.imageSmoothingQuality = "high";
+	  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+
+	  return canvas;
+	};
 
   const onOk = async () => {
     if (importing) return;

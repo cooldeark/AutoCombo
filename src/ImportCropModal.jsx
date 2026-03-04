@@ -372,6 +372,9 @@ export default function ImportCropModal({
               className="absolute left-0 top-0 rounded-xl border-2 border-fuchsia-400 shadow-[0_0_20px_rgba(217,70,239,0.35)] touch-none will-change-transform"
               style={rectToStyle(cropRect)}
               onPointerDown={onBoxPointerDown}
+			  onPointerMove={onWrapPointerMove}
+			  onPointerUp={endPointer}
+			  onPointerCancel={endPointer}
             >
               {["tl", "tr", "bl", "br"].map((corner) => (
                 <div

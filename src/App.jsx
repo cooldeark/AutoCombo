@@ -2676,7 +2676,7 @@ const buildSegmentLabelsFromRcPath = (
 			  <img src={logoImg} className="w-8 h-8" alt="" />
 
 			  <h1 className="text-lg md:text-xl font-black tracking-wide">
-				  Tower of Saviors 神魔之塔自動轉珠模擬器
+				  Tower of Saviors 神魔之塔｜自動｜轉珠模擬器
 				</h1>
 			</div>
 
@@ -2684,7 +2684,7 @@ const buildSegmentLabelsFromRcPath = (
 			{/* <button className="px-3 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-sm">?</button> */}
 		  </div>
 		</div>
-		<div className="mx-auto max-w-5xl w-full px-4 py-4">
+		<div className="mx-auto max-w-5xl w-full px-2 sm:px-4 py-4 flex flex-col items-center">
 		   <div className="max-w-5xl w-full">
 			{/* 四組模式切換器 - 改為比例 2:2:1:1 */}
 			<div className="grid grid-cols-6 gap-1.5 mb-8 text-[14px]">
@@ -3359,16 +3359,15 @@ const buildSegmentLabelsFromRcPath = (
 			{/* Modal 編輯器 */}
 			{showEditor && (
 			  <div
-				className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+				className="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
 			  >
 				<div
-				  className="bg-neutral-900 w-full max-w-xl rounded-3xl border border-neutral-800 shadow-2xl overflow-hidden
-							 max-h-[calc(100vh-2rem)] flex flex-col"
+				  className="bg-neutral-900 w-full max-w-2xl rounded-3xl border border-neutral-800 shadow-2xl overflow-hidden max-h-[calc(100vh-2rem)] flex flex-col"
 				  onClick={(e) => e.stopPropagation()}
 				>
 				  {/* ✅ 內容區：可滾動 */}
 				  <div
-					  className="p-6 flex-1 overflow-y-auto overscroll-contain"
+					  className="p-3 flex-1 overflow-y-auto overscroll-contain"
 					  style={{
 						WebkitOverflowScrolling: "touch",
 						contain: "content",           // ✅ 隔離 layout/paint
@@ -3377,7 +3376,7 @@ const buildSegmentLabelsFromRcPath = (
 					  }}
 					>
 					<div className="flex flex-col items-center">
-					  <div className="bg-neutral-950 p-3 rounded-3xl border-2 border-neutral-800 mt-6 mb-8">
+					  <div className="relative bg-neutral-900 p-3 rounded-3xl shadow-2xl border-2 border-neutral-800 mb-6 mx-auto w-fit overflow-visible mt-6">
 						<div className="grid grid-cols-6 gap-0">
 						  {editingBoard.map((row, r) => (
 							  <React.Fragment key={r}>
@@ -3454,10 +3453,11 @@ const buildSegmentLabelsFromRcPath = (
 									  ${r === 0 ? 'ring-2 ring-yellow-400 z-10 rounded-2xl' : 'rounded-2xl'}
 									  ${orbOf(editingBoard[r][c]) === selectedBrush ? 'ring-2 ring-white' : ''}
 									`}
+									style={{ backgroundColor: '#171717' }}
 								  >
 									<img
 									  src={Object.values(ORB_TYPES).find(t => t.id === orbOf(orb))?.img}
-									  className="w-[90%] h-[90%] object-contain pointer-events-none select-none"
+									  className="w-[100%] h-[100%] object-contain pointer-events-none select-none"
 									  draggable={false}
 									  alt=""
 									/>
@@ -3693,7 +3693,6 @@ const buildSegmentLabelsFromRcPath = (
 />
     </div>
   );
-
 };
 
 const clamp = (v, min, max) => Math.min(max, Math.max(min, v));

@@ -1943,7 +1943,7 @@ const hypot = (x, y) => Math.hypot(x, y);
 const q = (v, unit = 0.25) => Math.round(v / unit) * unit;
 
 const lineIntersection = (P, r, Q, s, eps = 1e-9) => {
-  // Solve: P + t r  intersects  Q + u s
+  // Solve: P + t r intersects Q + u s
   const cross = (a, b) => a.x * b.y - a.y * b.x;
   const rxs = cross(r, s);
   if (Math.abs(rxs) < eps) return null;
@@ -1951,6 +1951,17 @@ const lineIntersection = (P, r, Q, s, eps = 1e-9) => {
   const qmp = { x: Q.x - P.x, y: Q.y - P.y };
   const t = cross(qmp, s) / rxs;
   return { x: P.x + r.x * t, y: P.y + r.y * t, t };
+};
+
+// ✅ 避免跟你檔案內既有名稱撞到
+const isReasonableIntersectionGeom = (hit, refA, refB, maxDist = 96) => {
+  if (!hit) return false;
+  if (!Number.isFinite(hit.x) || !Number.isFinite(hit.y)) return false;
+
+  const d1 = hypot(hit.x - refA.x, hit.y - refA.y);
+  const d2 = hypot(hit.x - refB.x, hit.y - refB.y);
+
+  return d1 <= maxDist && d2 <= maxDist;
 };
 
 // Edge keys: undirected + quantized => reverse counts as overlap too
@@ -2072,7 +2083,14 @@ const collapseUpcomingOverlapRunsV3 = (
     const rBD = { x: D.x - B.x, y: D.y - B.y };
     const hitD = lineIntersection(P, r, B, rBD, 1e-9);
 
-    if (!hitC || !hitD) { fallback(); return; }
+    if (
+      !hitC || !hitD ||
+      !isReasonableIntersectionGeom(hitC, C, A) ||
+      !isReasonableIntersectionGeom(hitD, B, D)
+    ) {
+      fallback();
+      return;
+    }
 
     out.push({ x: hitC.x, y: hitC.y }, { x: hitD.x, y: hitD.y }, D);
   };
@@ -2151,7 +2169,11 @@ const straightenBumpToParallelLine = (C, A, B, D, h, eps = 1e-6) => {
   const rBD = { x: D.x - B.x, y: D.y - B.y };
   const hitD = lineIntersection(Pn, rn, B, rBD, 1e-9);
 
-  if (!hitC || !hitD) return null;
+  if (
+    !hitC || !hitD ||
+    !isReasonableIntersectionGeom(hitC, C, A) ||
+    !isReasonableIntersectionGeom(hitD, B, D)
+  ) return null;
 
   return {
     C2: { x: hitC.x, y: hitC.y },
@@ -2444,7 +2466,8 @@ const buildSegmentLabelsFromRcPath = (
   }
 
   return labels;
-};  
+};
+
   // 小工具：確保 <img> 真的載入完成
   const ensureImageLoaded = (imgEl) =>
 	  new Promise((resolve, reject) => {
@@ -2676,7 +2699,7 @@ const buildSegmentLabelsFromRcPath = (
 			  <img src={logoImg} className="w-8 h-8" alt="" />
 
 			  <h1 className="text-lg md:text-xl font-black tracking-wide">
-				  Tower of Saviors 神魔之塔｜自動｜轉珠模擬器
+				  Tower of Saviors 神魔之塔｜自動 Auto｜轉珠模擬器
 				</h1>
 			</div>
 
@@ -3203,7 +3226,7 @@ const buildSegmentLabelsFromRcPath = (
 						<div className="absolute inset-0 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
 						{priorityMode === 'steps' ? <Footprints className="absolute inset-0 m-auto text-amber-400 animate-pulse" size={32} /> : <Trophy className="absolute inset-0 m-auto text-emerald-400 animate-pulse" size={32} />}
 					  </div>
-					  <p className="font-black text-xl text-indigo-500 tracking-[0.2em] animate-pulse uppercase">{skyfallEnabled ? 'Skyfall Analysis' : priorityMode === 'steps' ? 'Optimizing Time' : 'Deep Searching'}</p>
+					  <p className="font-black text-xl text-indigo-500 tracking-[0.2em] animate-pulse uppercase">{skyfallEnabled ? 'Combo Analysis' : priorityMode === 'steps' ? 'Optimizing Time' : 'Deep Searching'}</p>
 					</div>)}
 				   {/* ✅ GIF footer：會被 toCanvas 一起截進去 */}
 					{gifCaptureMode && (

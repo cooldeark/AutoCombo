@@ -2871,7 +2871,7 @@ const buildSegmentLabelsFromRcPath = (
 			</div>
 
 			{/* 棋盤容器 */}
-			<div style={{ contain: 'layout paint' }} ref={boardWrapRef} className="relative bg-neutral-900 p-3 rounded-3xl shadow-2xl border-2 border-neutral-800 mb-6 mx-auto w-fit overflow-visible" >
+			<div style={{ contain: 'layout paint' }} ref={boardWrapRef} className="relative bg-neutral-900 p-1 rounded-3xl shadow-2xl border-2 border-neutral-800 mb-6 mx-auto w-full max-w-[500px] overflow-visible" >
 			  <div ref={boardInnerRef} className="relative overflow-visible">
 				<div className="grid grid-cols-6 gap-0">
 				  {renderBoard.map((row, r) => (
@@ -3362,7 +3362,7 @@ const buildSegmentLabelsFromRcPath = (
 				className="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
 			  >
 				<div
-				  className="bg-neutral-900 w-full max-w-2xl rounded-3xl border border-neutral-800 shadow-2xl overflow-hidden max-h-[calc(100vh-2rem)] flex flex-col"
+				  className="pt-5 bg-neutral-900 w-full max-w-2xl rounded-3xl border border-neutral-800 shadow-2xl overflow-hidden max-h-[calc(100vh-2rem)] flex flex-col"
 				  onClick={(e) => e.stopPropagation()}
 				>
 				  {/* ✅ 內容區：可滾動 */}
@@ -3377,7 +3377,7 @@ const buildSegmentLabelsFromRcPath = (
 					>
 					<div className="flex flex-col items-center">
 					  <div className="relative bg-neutral-900 p-3 rounded-3xl shadow-2xl border-2 border-neutral-800 mb-6 mx-auto w-fit overflow-visible mt-6">
-						<div className="grid grid-cols-6 gap-0">
+						<div className="grid grid-cols-6">
 						  {editingBoard.map((row, r) => (
 							  <React.Fragment key={r}>
 
@@ -3449,12 +3449,15 @@ const buildSegmentLabelsFromRcPath = (
 										return;
 									  }
 									}}
-									className={`relative w-16 h-16 md:w-20 md:h-20 flex items-center justify-center transition-all duration-75
-									  ${r === 0 ? 'ring-2 ring-yellow-400 z-10 rounded-2xl' : 'rounded-2xl'}
-									  ${orbOf(editingBoard[r][c]) === selectedBrush ? 'ring-2 ring-white' : ''}
-									`}
-									style={{ backgroundColor: '#171717' }}
-								  >
+									className="relative w-16 h-16 md:w-20 md:h-20 flex items-center justify-center transition-all duration-75 rounded-2xl"
+>
+  {/* 2. ✨ 新增這層獨立的「95% 專屬外框」 */}
+  <div 
+    className={`absolute inset-0 m-auto w-[95%] h-[95%] rounded-2xl pointer-events-none transition-all duration-75
+      ${r === 0 ? 'ring-2 ring-yellow-400 z-10' : ''}
+      ${orbOf(editingBoard[r][c]) === selectedBrush ? 'ring-2 ring-white z-20' : ''}
+    `} 
+  />
 									<img
 									  src={Object.values(ORB_TYPES).find(t => t.id === orbOf(orb))?.img}
 									  className="w-[100%] h-[100%] object-contain pointer-events-none select-none"
@@ -3502,7 +3505,7 @@ const buildSegmentLabelsFromRcPath = (
 						<p className="text-xs font-black text-neutral-500 uppercase tracking-widest text-center mb-4">
 						  ORB PALETTE
 						</p>
-						<div className="grid grid-cols-6 gap-3 mb-2 justify-items-center">
+						<div className="flex justify-center gap-3 mb-2">
 						  {Object.values(ORB_TYPES).map((type) => (
 							<button
 							  key={type.id}
@@ -3512,7 +3515,7 @@ const buildSegmentLabelsFromRcPath = (
 							>
 							  <img
 								src={type.img}
-								className="w-[88%] h-[88%] object-contain pointer-events-none select-none"
+								className="w-[100%] h-[100%] object-contain pointer-events-none select-none"
 								draggable={false}
 								alt=""
 							  />

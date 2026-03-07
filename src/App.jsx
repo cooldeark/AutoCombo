@@ -92,6 +92,9 @@ function topKByScore(items, K, getScore) {
 }
 
 const App = () => {
+	
+const diagAssistRef = useRef(null);
+const DIAG_WINDOW_MS = 70;
 
 const manualStartFromRow0Ref = useRef(false);
 
@@ -390,6 +393,15 @@ const [manualActive, setManualActive] = useState(false); // 轉珠是否已開�
 
 ///////////
 
+const getAxisFromNeighbor = (baseR, baseC, r, c) => {
+  const dr = r - baseR;
+  const dc = c - baseC;
+  if (Math.abs(dr) + Math.abs(dc) !== 1) return null;
+  if (dr === 0) return { axis: 'h', sr: 0, sc: Math.sign(dc) };
+  if (dc === 0) return { axis: 'v', sr: Math.sign(dr), sc: 0 };
+  return null;
+};
+
 const flushManualVisual = useCallback(() => {
   moveFlushRAFRef.current = 0;
 
@@ -442,44 +454,6 @@ const getCellFromClientPoint = useCallback(
     return { r, c };
   },
   [stableCellSize]
-);
-
-const traceCellsBetweenPoints = useCallback(
-  (x0, y0, x1, y1) => {
-    if (
-      !Number.isFinite(x0) ||
-      !Number.isFinite(y0) ||
-      !Number.isFinite(x1) ||
-      !Number.isFinite(y1)
-    ) {
-      return [];
-    }
-
-    const dx = x1 - x0;
-    const dy = y1 - y0;
-    const dist = Math.hypot(dx, dy);
-
-    const samples = Math.max(1, Math.ceil(dist / 6));
-    const cells = [];
-    let lastKey = "";
-
-    for (let i = 1; i <= samples; i++) {
-      const t = i / samples;
-      const x = x0 + dx * t;
-      const y = y0 + dy * t;
-      const cell = getCellFromClientPoint(x, y);
-      if (!cell) continue;
-
-      const key = `${cell.r}-${cell.c}`;
-      if (key !== lastKey) {
-        cells.push(cell);
-        lastKey = key;
-      }
-    }
-
-    return cells;
-  },
-  [getCellFromClientPoint]
 );
 
 const tryMoveToCell = useCallback(
@@ -587,6 +561,62 @@ const tryMoveToCell = useCallback(
   },
   [manualLocked, scheduleManualVisualFlush, diagonalEnabled]
 );
+
+const tryResolveDiagonalAssist = useCallback((hitR, hitC) => {
+  const currentPath = pathRef.current;
+  const last = currentPath[currentPath.length - 1];
+  if (!last) return false;
+
+  const info = getAxisFromNeighbor(last.r, last.c, hitR, hitC);
+  if (!info) return false;
+
+  const now = performance.now();
+  const pending = diagAssistRef.current;
+
+  // 沒有候選：先存起來
+  if (
+    !pending ||
+    pending.baseR !== last.r ||
+    pending.baseC !== last.c ||
+    now - pending.ts > DIAG_WINDOW_MS
+  ) {
+    diagAssistRef.current = {
+      baseR: last.r,
+      baseC: last.c,
+      hitR,
+      hitC,
+      axis: info.axis,
+      sr: info.sr,
+      sc: info.sc,
+      ts: now,
+    };
+    return true; // 先吃掉事件，但先不 move
+  }
+
+  // 軸不同 => 嘗試合成斜轉
+  if (pending.axis !== info.axis) {
+    const diagR = last.r + (pending.sr || info.sr);
+    const diagC = last.c + (pending.sc || info.sc);
+
+    diagAssistRef.current = null;
+    return tryMoveToCell(diagR, diagC);
+  }
+
+  // 同軸：把上一個候選當一般移動，然後更新候選
+  const ok = tryMoveToCell(pending.hitR, pending.hitC);
+  diagAssistRef.current = {
+    baseR: last.r,
+    baseC: last.c,
+    hitR,
+    hitC,
+    axis: info.axis,
+    sr: info.sr,
+    sc: info.sc,
+    ts: now,
+  };
+  return ok;
+}, [tryMoveToCell]);
+
 
 const triggerMoveEndedOverlay = useCallback(
   (duration = 800) => {
@@ -742,8 +772,14 @@ const handleToggleMode = (manual) => {
 
 const handleManualStart = (r, c, e) => {
   if (!isManual || manualLocked || solving || isReplaying) return;
+  if (!originalBoard || originalBoard.length === 0) return;
 
-  const currentBoard = boardRef.current;
+  // ✅ 每次重新開始手動前，先回到原版面
+  const restoredBoard = clearMarksForManual(clone2D(originalBoard));
+  boardRef.current = restoredBoard;
+  setBoard(restoredBoard);
+
+  const currentBoard = restoredBoard;
   const startOrb = currentBoard?.[r]?.[c];
   if (startOrb === undefined) return;
 
@@ -834,52 +870,51 @@ const handleManualMove = (r, c, e) => {
   const { x, y } = getBoardLocalPos(clientX, clientY);
   scheduleFloatingUpdate(x, y);
 
-  const prev = pointerLastClientRef.current;
-  if (!prev || !Number.isFinite(prev.x) || !Number.isFinite(prev.y)) {
-    pointerLastClientRef.current = { x: clientX, y: clientY };
-    if (typeof r === "number" && typeof c === "number" && r >= 0 && c >= 0) {
-      tryMoveToCell(r, c);
-    }
-    return;
-  }
-
-  const crossedCells = traceCellsBetweenPoints(prev.x, prev.y, clientX, clientY);
   pointerLastClientRef.current = { x: clientX, y: clientY };
 
-  if (crossedCells.length > 0) {
-  for (const cell of crossedCells) {
-    const ok = tryMoveToCell(cell.r, cell.c);
+  // 直接看目前指標落在哪一格
+  const hitCell = getCellFromClientPoint(clientX, clientY);
 
-    // ✅ 如果 sample 出來的格子因為跳格/漏格沒走成功
-    // 就改用 chase 一步一步補追
-    if (!ok) {
-      chaseToTargetCell(cell.r, cell.c);
+  // 先用真實指標位置
+  if (hitCell && isDraggingRef.current) {
+  const last = pathRef.current[pathRef.current.length - 1];
+
+  if (last) {
+    const dr = Math.abs(hitCell.r - last.r);
+    const dc = Math.abs(hitCell.c - last.c);
+
+    // 正交鄰格先走斜轉輔助判定
+    if (dr + dc === 1) {
+      const consumed = tryResolveDiagonalAssist(hitCell.r, hitCell.c);
+      if (consumed) return;
+    } else {
+      // 不是正交時，清掉候選
+      diagAssistRef.current = null;
     }
-
-    if (!isDraggingRef.current) break;
   }
+
+  const ok = tryMoveToCell(hitCell.r, hitCell.c);
+  if (!ok) {
+    chaseToTargetCell(hitCell.r, hitCell.c);
+  }
+  return;
 }
 
-// ✅ 不管 crossedCells 有沒有，都再用「目前實際指標所在格」補一次
-const liveCell = getCellFromClientPoint(clientX, clientY);
-if (liveCell && isDraggingRef.current) {
-  const ok = tryMoveToCell(liveCell.r, liveCell.c);
-  if (!ok) {
-    chaseToTargetCell(liveCell.r, liveCell.c);
+  // 後備：若事件本身有帶 r,c，就用它
+  if (
+    typeof r === "number" &&
+    typeof c === "number" &&
+    r >= 0 &&
+    c >= 0 &&
+    r < TOTAL_ROWS &&
+    c < COLS &&
+    isDraggingRef.current
+  ) {
+    const ok = tryMoveToCell(r, c);
+    if (!ok) {
+      chaseToTargetCell(r, c);
+    }
   }
-} else if (
-  typeof r === "number" &&
-  typeof c === "number" &&
-  r >= 0 &&
-  c >= 0 &&
-  isDraggingRef.current
-) {
-  const ok = tryMoveToCell(r, c);
-  if (!ok) {
-    chaseToTargetCell(r, c);
-  }
-}
-  
 };
 
 const handleManualEnd = useCallback(() => {
@@ -971,7 +1006,7 @@ const chaseToTargetCell = useCallback(
     let moved = false;
     let guard = 0;
 
-    while (guard++ < 20) {
+    while (guard++ < 24) {
       const currentPath = pathRef.current;
       const last = currentPath[currentPath.length - 1];
       if (!last) break;
@@ -988,18 +1023,16 @@ const chaseToTargetCell = useCallback(
         stepC += dc === 0 ? 0 : dc > 0 ? 1 : -1;
       } else {
         if (Math.abs(dr) >= Math.abs(dc)) {
-          stepR += dr === 0 ? 0 : dr > 0 ? 1 : -1;
+          stepR += dr > 0 ? 1 : -1;
         } else {
-          stepC += dc === 0 ? 0 : dc > 0 ? 1 : -1;
+          stepC += dc > 0 ? 1 : -1;
         }
       }
 
-      if (stepR === last.r && stepC === last.c) break;
-
       const ok = tryMoveToCell(stepR, stepC);
       if (!ok) break;
-      moved = true;
 
+      moved = true;
       if (!isDraggingRef.current) break;
     }
 
@@ -1727,18 +1760,23 @@ const beamSolve = (originalBoard, cfg, target, mode, priority, skyfall, diagonal
         }
 
         if (state.r >= PLAY_ROWS_START && nr === 0) {
-          const destVal = state.board[0][nc];
-          const chk = stepConstraint(destVal);
-          if (!chk.ok) continue;
+		  const destVal = state.board[0][nc];
+		  const chk = stepConstraint(destVal);
+		  if (!chk.ok) continue;
 
-          const evalBoard = boardWithHeldFilled(state.board, state.hole, state.held);
-          const ev = evaluateBoard(evalBoard, skyfall);
-          const pot = potentialScore(evalBoard, mode);
-          const score = calcScore(ev, pot, newSteps, cfg, target, mode, priority);
+		  const evalBoard = clone2D(state.board);
+		  if (state.hole) {
+			// ✅ 結束到 row0：洞補 row0 該欄珠
+			evalBoard[state.hole.r][state.hole.c] = destVal;
+		  }
 
-          considerBest(ev, score, newNode);
-          continue;
-        }
+		  const ev = evaluateBoard(evalBoard, skyfall);
+		  const pot = potentialScore(evalBoard, mode);
+		  const score = calcScore(ev, pot, newSteps, cfg, target, mode, priority);
+
+		  considerBest(ev, score, newNode);
+		  continue;
+		}
 
         if (nr < PLAY_ROWS_START || !state.hole) continue;
 
@@ -1921,7 +1959,7 @@ const beamSolve = (originalBoard, cfg, target, mode, priority, skyfall, diagonal
       if (currRC.r === 0) {
         if (s.hole) {
           const bb = s.b.map(r => [...r]);
-          bb[s.hole.r][s.hole.c] = s.held;
+          bb[s.hole.r][s.hole.c] = s.b[0][currRC.c];
           setReplayBoard(bb);
         } else {
           setReplayBoard(s.b.map(r => [...r]));
@@ -1974,8 +2012,15 @@ const beamSolve = (originalBoard, cfg, target, mode, priority, skyfall, diagonal
     st.lastNode = lastIdx;
   }
       const bb = s.b.map(r => [...r]);
-      if (s.hole)
-        bb[s.hole.r][s.hole.c] = s.held;
+		if (s.hole) {
+		  const lastRC = s.targetPath[lastIdx];
+		  if (lastRC.r === 0) {
+			// ✅ 結束在 row0，用 row0 該欄的珠補洞
+			bb[s.hole.r][s.hole.c] = s.b[0][lastRC.c];
+		  } else {
+			bb[s.hole.r][s.hole.c] = s.held;
+		  }
+		}
 
       setReplayBoard(bb);
       setFloating(null);
@@ -2540,7 +2585,7 @@ const beamSolve = (originalBoard, cfg, target, mode, priority, skyfall, diagonal
 		  if (currRC.r === 0) {
 			if (st.hole) {
 			  const bb = st.b.map(r => [...r]);
-			  bb[st.hole.r][st.hole.c] = st.held;
+			  bb[st.hole.r][st.hole.c] = st.b[0][currRC.c];
 			  setReplayBoard(bb);
 			} else {
 			  setReplayBoard(st.b.map(r => [...r]));
@@ -2590,8 +2635,17 @@ const beamSolve = (originalBoard, cfg, target, mode, priority, skyfall, diagonal
 		st.lastNode = lastIdx;
 	  }
 		  const bb = st.b.map(r => [...r]);
-		  if (st.hole) bb[st.hole.r][st.hole.c] = st.held;
-		  setReplayBoard(bb);
+			if (st.hole) {
+			  const lastRC = st.targetPath[lastIdx];
+
+			  if (lastRC.r === 0) {
+				// ✅ 最後停在 row0，用 row0 該欄珠補洞
+				bb[st.hole.r][st.hole.c] = st.b[0][lastRC.c];
+			  } else {
+				bb[st.hole.r][st.hole.c] = st.held;
+			  }
+			}
+			setReplayBoard(bb);
 
 		  setHolePos(null);
 		  setFloating(null);
@@ -4266,99 +4320,143 @@ const buildSegmentLabelsFromRcPath = (
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-3 justify-center">
-          <button
-            onClick={() => initBoard(true)}
-            disabled={solving || isReplaying || exportingGif}
-            className="flex items-center gap-2 bg-neutral-800 hover:bg-neutral-700 disabled:opacity-20 px-6 py-4 rounded-2xl font-bold transition-all text-sm border border-neutral-700 shadow-md active:scale-95"
-          >
-            <RefreshCw size={20} /> 隨機生成
-          </button>
+        {(() => {
+  const showStop =
+    isReplaying || isPaused || exportingGif || currentStep !== -1;
 
-          <button
-            onClick={handleOpenEditor}
-            disabled={solving || isReplaying || exportingGif}
-            className="flex items-center gap-2 bg-neutral-800 hover:bg-neutral-700 disabled:opacity-20 px-6 py-4 rounded-2xl font-bold transition-all text-sm border border-neutral-700 shadow-md active:scale-95"
-          >
-            <Edit3 size={20} /> 自訂版面
-          </button>
+  const actionButtons = [
+    {
+      key: "random",
+      node: (
+        <button
+          onClick={() => initBoard(true)}
+          disabled={solving || isReplaying || exportingGif}
+          className="w-full min-w-0 flex items-center justify-center gap-1.5 bg-neutral-800 hover:bg-neutral-700 disabled:opacity-20 px-2 py-3 rounded-2xl font-black transition-all text-sm border border-neutral-700 shadow-md active:scale-95"
+        >
+          <RefreshCw size={17} /> 隨機
+        </button>
+      ),
+    },
+    {
+      key: "editor",
+      node: (
+        <button
+          onClick={handleOpenEditor}
+          disabled={solving || isReplaying || exportingGif}
+          className="w-full min-w-0 flex items-center justify-center gap-1.5 bg-neutral-800 hover:bg-neutral-700 disabled:opacity-20 px-2 py-3 rounded-2xl font-black transition-all text-sm border border-neutral-700 shadow-md active:scale-95"
+        >
+          <Edit3 size={17} /> 自訂
+        </button>
+      ),
+    },
+    ...(!isManual
+      ? [
+          {
+            key: "solve",
+            node: (
+              <button
+                onClick={solve}
+                disabled={solving || isReplaying || showEditor || exportingGif}
+                className={[
+                  "w-full min-w-0 flex items-center justify-center gap-1.5 px-2 py-3 rounded-2xl font-black shadow-xl transition-all text-sm border active:scale-95",
+                  solving || isReplaying || showEditor || exportingGif
+                    ? "opacity-20"
+                    : "",
+                  needsSolve
+                    ? "bg-emerald-600 hover:bg-emerald-500 border-emerald-400/30 shadow-emerald-900/30 text-white"
+                    : "bg-neutral-800 hover:bg-neutral-700 border-neutral-700 text-neutral-200",
+                ].join(" ")}
+                title={needsSolve ? "參數已變更，尚未重新計算" : "目前結果已是最新"}
+              >
+                <Lightbulb size={17} />
+                計算
+              </button>
+            ),
+          },
+        ]
+      : []),
+    {
+      key: "play",
+      node: (
+        <button
+          onClick={() => {
+            if (isReplaying && !isPaused) return pauseReplay();
+            if (isPaused) return resumeReplay();
 
-          {!isManual && (
-            <button
-              onClick={solve}
-              disabled={solving || isReplaying || showEditor || exportingGif}
-              className={[
-                "flex items-center gap-2 px-8 py-4 rounded-2xl font-black shadow-xl transition-all text-sm border active:scale-95",
-                solving || isReplaying || showEditor || exportingGif
-                  ? "opacity-20"
-                  : "",
-                needsSolve
-                  ? "bg-emerald-600 hover:bg-emerald-500 border-emerald-400/30 shadow-emerald-900/30 text-white"
-                  : "bg-neutral-800 hover:bg-neutral-700 border-neutral-700 text-neutral-200",
-              ].join(" ")}
-              title={needsSolve ? "參數已變更，尚未重新計算" : "目前結果已是最新"}
-            >
-              <Lightbulb size={20} />
-              {solving ? "計算中..." : needsSolve ? "待計算" : "已計算"}
-            </button>
+            if (!path || path.length === 0) return;
+            const s = getCellCenterPx(path[0].r, path[0].c);
+            const startPx = { x: s.x, y: s.y - 30 };
+            replayPathContinuous(path, startPx);
+          }}
+          disabled={
+            solving ||
+            exportingGif ||
+            (path.length === 0 && !isReplaying && !isPaused)
+          }
+          className={[
+            "w-full min-w-0 flex items-center justify-center gap-1.5 px-2 py-3 rounded-2xl font-black shadow-xl transition-all text-sm border active:scale-95",
+            solving || exportingGif ? "opacity-20" : "",
+            isReplaying && !isPaused
+              ? "bg-red-600 hover:bg-red-500 border-red-400/30 shadow-red-900/40 text-white"
+              : isPaused
+              ? "bg-orange-500 hover:bg-orange-400 border-orange-300/30 shadow-orange-900/30 text-white"
+              : "bg-indigo-600 hover:bg-indigo-500 border-indigo-400/30 shadow-indigo-900/40 text-white",
+          ].join(" ")}
+        >
+          {isReplaying && !isPaused ? (
+            <>
+              <Pause size={17} fill="white" /> 暫停
+            </>
+          ) : isPaused ? (
+            <>
+              <Play size={17} fill="white" /> 繼續
+            </>
+          ) : (
+            <>
+              <Play size={17} fill="white" /> 播放
+            </>
           )}
-
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                if (isReplaying && !isPaused) return pauseReplay();
-                if (isPaused) return resumeReplay();
-
-                if (!path || path.length === 0) return;
-                const s = getCellCenterPx(path[0].r, path[0].c);
-                const startPx = { x: s.x, y: s.y - 30 };
-                replayPathContinuous(path, startPx);
-              }}
-              disabled={
-                solving ||
-                exportingGif ||
-                (path.length === 0 && !isReplaying && !isPaused)
-              }
-              className={[
-                "flex items-center gap-2 px-10 py-4 rounded-2xl font-black shadow-xl transition-all text-base active:scale-95",
-                solving || exportingGif ? "opacity-20" : "",
-                isReplaying && !isPaused
-                  ? "bg-red-600 hover:bg-red-500 shadow-red-900/40"
-                  : isPaused
-                  ? "bg-orange-500 hover:bg-orange-400 shadow-orange-900/30"
-                  : "bg-indigo-600 hover:bg-indigo-500 shadow-indigo-900/40",
-              ].join(" ")}
-            >
-              {isReplaying && !isPaused ? (
-                <>
-                  <Pause size={22} fill="white" /> 暫停播放
-                </>
-              ) : isPaused ? (
-                <>
-                  <Play size={22} fill="white" /> 繼續播放
-                </>
-              ) : (
-                <>
-                  <Play size={22} fill="white" /> 重播路徑
-                </>
-              )}
-            </button>
-
-            {(isReplaying || isPaused || exportingGif || currentStep !== -1) && (
+        </button>
+      ),
+    },
+    ...(showStop
+      ? [
+          {
+            key: "stop",
+            node: (
               <button
                 onClick={() => stopToBase(true)}
                 disabled={exportingGif}
                 className={[
-                  "p-4 bg-neutral-800 hover:bg-neutral-700 rounded-2xl border border-neutral-700 active:scale-95 transition-all text-neutral-300",
+                  "w-full min-w-0 flex items-center justify-center gap-1.5 px-2 py-3 rounded-2xl font-black transition-all text-sm border border-neutral-700 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 active:scale-95 shadow-md",
                   exportingGif ? "opacity-20 pointer-events-none" : "",
                 ].join(" ")}
                 title="Stop / 回到原盤"
               >
-                <Square size={20} fill="currentColor" />
+                <Square size={17} fill="currentColor" />
+                中止
               </button>
-            )}
-          </div>
-        </div>
+            ),
+          },
+        ]
+      : []),
+  ];
+
+  return (
+    <div className="mt-1 mb-2 flex justify-center">
+      <div
+        className="grid gap-2 w-full max-w-4xl"
+        style={{
+          gridTemplateColumns: `repeat(${actionButtons.length}, minmax(0, 1fr))`,
+        }}
+      >
+        {actionButtons.map((btn) => (
+          <React.Fragment key={btn.key}>{btn.node}</React.Fragment>
+        ))}
+      </div>
+    </div>
+  );
+})()}
 
         <div className="flex flex-col items-center mt-3 gap-2">
           <div className="flex items-center gap-3">

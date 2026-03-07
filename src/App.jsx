@@ -4003,9 +4003,13 @@ const buildSegmentLabelsFromRcPath = (
               </defs>
 
               {(() => {
+  const isManualDragging = isManual && isDragging;
+
+  // ✅ 手動轉珠中：整條路徑 + 起點綠燈 + 終點紅燈 全隱藏
+  if (isManualDragging) return null;
+
   if (!path || path.length < 2) return null;
 
-  const isManualDragging = isManual && isDragging;
   const visiblePath = path.slice(0, currentStep + 1);
   if (visiblePath.length < 2) return null;
 
